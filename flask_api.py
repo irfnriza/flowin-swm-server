@@ -50,9 +50,15 @@ def home():
         }
     })
 
-@app.route('/verify', methods=['GET'])
+@app.route('/verify', methods=['GET', 'POST'])
 def verify():
+    # Try to get device_id from query parameter first
     device_id = request.args.get('device_id')
+    
+    # If not in query, try to get from JSON body (for POST requests)
+    if not device_id and request.is_json:
+        data = request.get_json()
+        device_id = data.get('device_id')
     
     if not device_id:
         return jsonify({
@@ -76,35 +82,44 @@ def verify():
 
 @app.route('/data', methods=['POST'])
 def receive_data():
+    # Try to get device_id from query parameter
     device_id = request.args.get('device_id')
-    
-    if not device_id:
-        return jsonify({
-            "status": "error",
-            "message": "device_id parameter required"
-        }), 400
-    
-    devices = load_devices()
-    if device_id not in devices:
-        return jsonify({
-            "status": "error",
-            "message": "device not registered"
-        }), 404
     
     try:
         incoming_data = request.get_json()
         
-        if not isinstance(incoming_data, list):
+        # Check if it's wrapped format: {"device_id": "...", "data": [...]}
+        if isinstance(incoming_data, dict) and 'device_id' in incoming_data and 'data' in incoming_data:
+            # New format with wrapper
+            device_id = incoming_data['device_id']  # Override from JSON body
+            data_array = incoming_data['data']
+        elif isinstance(incoming_data, list):
+            # Old format: direct array
+            data_array = incoming_data
+        else:
             return jsonify({
                 "status": "error",
-                "message": "data must be a JSON array"
+                "message": "data must be a JSON array or object with device_id and data fields"
             }), 400
+        
+        if not device_id:
+            return jsonify({
+                "status": "error",
+                "message": "device_id required (in query param or JSON body)"
+            }), 400
+        
+        devices = load_devices()
+        if device_id not in devices:
+            return jsonify({
+                "status": "error",
+                "message": "device not registered"
+            }), 404
         
         # Load existing data
         all_data = load_data()
         
         # Add metadata
-        for record in incoming_data:
+        for record in data_array:
             record['device_id'] = device_id
             record['received_at'] = datetime.datetime.now().isoformat()
             all_data.append(record)
@@ -114,7 +129,7 @@ def receive_data():
         
         return jsonify({
             "status": "success",
-            "message": f"Received {len(incoming_data)} data points",
+            "message": f"Received {len(data_array)} data points",
             "device_id": device_id
         }), 200
         

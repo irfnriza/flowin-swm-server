@@ -51,9 +51,13 @@ def save_devices(devices):
 
 # API Endpoints (menggunakan Streamlit query params)
 def handle_verify():
-    """Handle /verify endpoint"""
+    """Handle /verify endpoint - accepts both GET and POST with JSON body"""
     params = st.query_params
     device_id = params.get("device_id", None)
+    
+    # Also try to get from session state (for POST with JSON body)
+    if not device_id and 'verify_device_id' in st.session_state:
+        device_id = st.session_state.verify_device_id
     
     if not device_id:
         return {"status": "error", "message": "device_id required"}
@@ -69,9 +73,23 @@ def handle_verify():
         return {"status": "error", "message": "device not registered"}
 
 def handle_data():
-    """Handle /data endpoint"""
+    """Handle /data endpoint - accepts JSON with device_id and data array"""
     params = st.query_params
     device_id = params.get("device_id", None)
+    
+    # Also try to get from incoming data (for JSON body)
+    if 'incoming_data' in st.session_state:
+        incoming_payload = st.session_state.incoming_data
+        
+        # Check if it's the new JSON format with device_id wrapper
+        if isinstance(incoming_payload, dict) and 'device_id' in incoming_payload:
+            device_id = incoming_payload['device_id']
+            incoming_data = incoming_payload.get('data', [])
+        else:
+            # Old format: direct array
+            incoming_data = incoming_payload if isinstance(incoming_payload, list) else []
+    else:
+        return {"status": "error", "message": "no data received"}
     
     if not device_id:
         return {"status": "error", "message": "device_id required"}
@@ -81,31 +99,23 @@ def handle_data():
     if device_id not in devices:
         return {"status": "error", "message": "device not registered"}
     
-    # Ambil data dari body (simulasi POST)
-    # Karena Streamlit tidak support POST body langsung, 
-    # kita akan terima data dari session state
-    if 'incoming_data' in st.session_state:
-        incoming_data = st.session_state.incoming_data
-        
-        # Load existing data
-        all_data = load_data()
-        
-        # Tambahkan metadata
-        for record in incoming_data:
-            record['device_id'] = device_id
-            record['received_at'] = datetime.datetime.now().isoformat()
-            all_data.append(record)
-        
-        # Save
-        save_data(all_data)
-        
-        return {
-            "status": "success",
-            "message": f"Received {len(incoming_data)} data points",
-            "device_id": device_id
-        }
+    # Load existing data
+    all_data = load_data()
     
-    return {"status": "error", "message": "no data received"}
+    # Tambahkan metadata
+    for record in incoming_data:
+        record['device_id'] = device_id
+        record['received_at'] = datetime.datetime.now().isoformat()
+        all_data.append(record)
+    
+    # Save
+    save_data(all_data)
+    
+    return {
+        "status": "success",
+        "message": f"Received {len(incoming_data)} data points",
+        "device_id": device_id
+    }
 
 # Streamlit UI
 def main():
@@ -219,17 +229,38 @@ def show_api_testing():
     st.subheader("1. Test /verify Endpoint")
     device_id_verify = st.text_input("Device ID (verify)", value="ESP32_WATER_001")
     
-    if st.button("Test Verify"):
-        devices = load_devices()
-        if device_id_verify in devices:
-            st.success(f"✅ Device verified: {device_id_verify}")
-            st.json({
-                "status": "verified",
-                "device_id": device_id_verify,
-                "device_info": devices[device_id_verify]
-            })
-        else:
-            st.error(f"❌ Device not registered: {device_id_verify}")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Test Verify (GET with Query Param)"):
+            devices = load_devices()
+            if device_id_verify in devices:
+                st.success(f"✅ Device verified: {device_id_verify}")
+                st.json({
+                    "status": "verified",
+                    "device_id": device_id_verify,
+                    "device_info": devices[device_id_verify]
+                })
+            else:
+                st.error(f"❌ Device not registered: {device_id_verify}")
+    
+    with col2:
+        if st.button("Test Verify (POST with JSON Body)"):
+            # Simulate POST with JSON body
+            st.session_state.verify_device_id = device_id_verify
+            devices = load_devices()
+            if device_id_verify in devices:
+                st.success(f"✅ Device verified: {device_id_verify}")
+                st.json({
+                    "status": "verified",
+                    "device_id": device_id_verify,
+                    "device_info": devices[device_id_verify]
+                })
+            else:
+                st.error(f"❌ Device not registered: {device_id_verify}")
+            
+            if 'verify_device_id' in st.session_state:
+                del st.session_state.verify_device_id
     
     st.markdown("---")
     
@@ -237,50 +268,66 @@ def show_api_testing():
     st.subheader("2. Test /data Endpoint")
     device_id_data = st.text_input("Device ID (data)", value="ESP32_WATER_001")
     
-    st.markdown("**Sample Data (JSON format):**")
-    sample_data = [
-        {"timestamp": 123456789, "flow_rate": 2.5, "volume": 150.2},
-        {"timestamp": 123456849, "flow_rate": 2.3, "volume": 152.5},
-    ]
+    st.markdown("**Sample Data (JSON format with device_id wrapper):**")
+    sample_data_wrapped = {
+        "device_id": "ESP32_WATER_001",
+        "data": [
+            {"timestamp": 123456789, "flow_rate": 2.5, "volume": 150.2},
+            {"timestamp": 123456849, "flow_rate": 2.3, "volume": 152.5},
+        ]
+    }
     
     data_input = st.text_area(
-        "Data (JSON array)",
-        value=json.dumps(sample_data, indent=2),
-        height=200
+        "Data (JSON with device_id and data array)",
+        value=json.dumps(sample_data_wrapped, indent=2),
+        height=250
     )
     
     if st.button("Test Send Data"):
         try:
             data = json.loads(data_input)
-            if not isinstance(data, list):
-                st.error("Data must be a JSON array")
+            
+            # Check format: could be wrapped (with device_id) or direct array
+            if isinstance(data, dict) and 'device_id' in data and 'data' in data:
+                # New format: {"device_id": "...", "data": [...]}
+                device_id_from_json = data['device_id']
+                data_array = data['data']
+                st.info(f"📦 Detected JSON format with device_id wrapper")
+            elif isinstance(data, list):
+                # Old format: direct array
+                device_id_from_json = device_id_data
+                data_array = data
+                st.info(f"📦 Detected direct array format")
             else:
-                # Simpan ke session state
-                st.session_state.incoming_data = data
+                st.error("Data must be either a JSON array or an object with 'device_id' and 'data' fields")
+                return
+            
+            # Simpan ke session state
+            st.session_state.incoming_data = data
+            
+            # Process
+            devices = load_devices()
+            if device_id_from_json not in devices:
+                st.error(f"❌ Device not registered: {device_id_from_json}")
+            else:
+                # Save data
+                all_data = load_data()
+                for record in data_array:
+                    record['device_id'] = device_id_from_json
+                    record['received_at'] = datetime.datetime.now().isoformat()
+                    all_data.append(record)
+                save_data(all_data)
                 
-                # Process
-                devices = load_devices()
-                if device_id_data not in devices:
-                    st.error(f"❌ Device not registered: {device_id_data}")
-                else:
-                    # Save data
-                    all_data = load_data()
-                    for record in data:
-                        record['device_id'] = device_id_data
-                        record['received_at'] = datetime.datetime.now().isoformat()
-                        all_data.append(record)
-                    save_data(all_data)
-                    
-                    st.success(f"✅ Successfully received {len(data)} data points!")
-                    st.json({
-                        "status": "success",
-                        "message": f"Received {len(data)} data points",
-                        "device_id": device_id_data
-                    })
-                    
-                    # Clear session state
-                    if 'incoming_data' in st.session_state:
-                        del st.session_state.incoming_data
+                st.success(f"✅ Successfully received {len(data_array)} data points!")
+                st.json({
+                    "status": "success",
+                    "message": f"Received {len(data_array)} data points",
+                    "device_id": device_id_from_json
+                })
+                
+                # Clear session state
+                if 'incoming_data' in st.session_state:
+                    del st.session_state.incoming_data
         except json.JSONDecodeError as e:
             st.error(f"❌ Invalid JSON: {str(e)}")
 

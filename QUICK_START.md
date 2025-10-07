@@ -1,12 +1,11 @@
 # 🚀 QUICK START GUIDE - Smart Water Meter
 
-## ⚡ Setup Cepat (5 Langkah)
+## ⚡ Setup Cepat (6 Langkah)
 
 ### 1️⃣ Edit Kode ESP32
-Buka `esp32-kode/smartwatermeterv2.cpp` dan ubah baris ini:
+Buka `esp32-kode/smartwatermeterv2.cpp` dan ubah baris 22-24:
 
 ```cpp
-const String DEVICE_ID = "ESP32_WATER_001";           // ID unik device Anda
 const char* WIFI_SSID = "NamaWiFiAnda";               // Ganti dengan WiFi Anda
 const char* WIFI_PASS = "PasswordWiFiAnda";           // Ganti dengan password WiFi
 const String SERVER_URL = "http://192.168.1.100:8501"; // IP komputer Anda
@@ -19,23 +18,62 @@ Arduino IDE → Tools → Port → [Pilih COM port ESP32]
 Arduino IDE → Upload
 ```
 
-### 3️⃣ Jalankan Server
+### 3️⃣ Konfigurasi Device ID via Bluetooth
+```
+1. Buka Serial Monitor (115200 baud)
+2. ESP32 akan show: "Bluetooth started: ESP32_WaterMeter"
+3. Pair dengan smartphone (scan: ESP32_WaterMeter)
+4. Gunakan app Bluetooth Terminal
+5. Kirim: ID:ESP32_WATER_001
+6. ESP32 respond: "Device ID set: ESP32_WATER_001"
+7. Device ID tersimpan permanent
+```
+
+### 4️⃣ Jalankan Server
 ```bash
 cd production_server
 pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-### 4️⃣ Test API
+### 5️⃣ Test API
 Buka browser: `http://localhost:8501`
 - Klik tab "API Testing"
 - Test verify endpoint
 - Test data endpoint dengan sample data
 
-### 5️⃣ Monitor Data
+### 6️⃣ Monitor Data
 - Buka tab "Dashboard"
 - Lihat data real-time dari ESP32
 - Flow rate akan update setiap 10 menit
+
+---
+
+## 🔄 Format Komunikasi
+
+### Verify Endpoint
+```http
+POST /verify?device_id=ESP32_WATER_001
+Content-Type: application/json
+
+{
+  "device_id": "ESP32_WATER_001"
+}
+```
+
+### Data Endpoint
+```http
+POST /data?device_id=ESP32_WATER_001
+Content-Type: application/json
+
+{
+  "device_id": "ESP32_WATER_001",
+  "data": [
+    {"timestamp": 123456789, "flow_rate": 2.5, "volume": 150.2},
+    {"timestamp": 123456849, "flow_rate": 2.3, "volume": 152.5}
+  ]
+}
+```
 
 ---
 
